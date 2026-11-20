@@ -87,12 +87,33 @@ type CampaignPlayerForm = Omit<CampaignPlayer, "id" | "level"> & {
   level: string;
 };
 
+type InitiativeParticipantType = "character" | "monster";
+
+type InitiativeParticipant = {
+  id: string;
+  name: string;
+  type: InitiativeParticipantType;
+  initiative: number;
+};
+
+type InitiativeEncounter = {
+  participants: InitiativeParticipant[];
+  activeParticipantId: string | null;
+  round: number;
+};
+
+type StoredInitiativeEncounter = {
+  encounter: InitiativeEncounter;
+  error: string | null;
+};
+
 type StoredCampaigns = {
   campaigns: Campaign[];
   error: string | null;
 };
 
 const STORAGE_KEY = "le-grimoire-campaigns";
+const INITIATIVE_STORAGE_KEY = "le-grimoire-initiative";
 
 function isCampaignStatus(value: unknown): value is CampaignStatus {
   return (
@@ -448,6 +469,88 @@ function loadCampaigns(): StoredCampaigns {
         "Impossible de lire les campagnes enregistrées dans ce navigateur.",
     };
   }
+}
+
+function emptyInitiativeEncounter(): InitiativeEncounter {
+  return {
+    participants: [],
+    activeParticipantId: null,
+    round: 1,
+  };
+}
+
+function isInitiativeParticipant(
+  value: unknown,
+): value is InitiativeParticipant {
+  return (
+    isRecord(value) &&
+    typeof value.id === "string" &&
+    value.id.length > 0 &&
+    typeof value.name === "string" &&
+    (value.type === "character" || value.type === "monster") &&
+    typeof value.initiative === "number" &&
+    Number.isFinite(value.initiative)
+  );
+}
+
+function loadInitiativeEncounter(): StoredInitiativeEncounter {
+  let stored: string | null;
+  try {
+    stored = window.localStorage.getItem(INITIATIVE_STORAGE_KEY);
+  } catch {
+    return {
+      encounter: emptyInitiativeEncounter(),
+      error:
+        "Impossible de lire la rencontre enregistrée dans ce navigateur.",
+    };
+  }
+  if (!stored) {
+    return { encounter: emptyInitiativeEncounter(), error: null };
+  }
+
+  let parsed: unknown;
+  try {
+    parsed = JSON.parse(stored);
+  } catch {
+    return {
+      encounter: emptyInitiativeEncounter(),
+      error:
+        "La rencontre enregistrée est illisible. Elle n’a pas été supprimée.",
+    };
+  }
+  if (
+    !isRecord(parsed) ||
+    !Array.isArray(parsed.participants) ||
+    !parsed.participants.every(isInitiativeParticipant) ||
+    typeof parsed.round !== "number" ||
+    !Number.isInteger(parsed.round) ||
+    parsed.round < 1 ||
+    !(
+      parsed.activeParticipantId === null ||
+      typeof parsed.activeParticipantId === "string"
+    ) ||
+    (typeof parsed.activeParticipantId === "string" &&
+      !parsed.participants.some(
+        (participant) =>
+          isInitiativeParticipant(participant) &&
+          participant.id === parsed.activeParticipantId,
+      ))
+  ) {
+    return {
+      encounter: emptyInitiativeEncounter(),
+      error:
+        "La rencontre enregistrée est illisible. Elle n’a pas été supprimée.",
+    };
+  }
+
+  return {
+    encounter: {
+      participants: parsed.participants,
+      activeParticipantId: parsed.activeParticipantId,
+      round: parsed.round,
+    },
+    error: null,
+  };
 }
 
 function formatDate(value: string) {
@@ -1982,8 +2085,417 @@ function EncyclopediaPage() {
   );
 }
 
+function InitiativeTracker() {
+  const [initialState] = useState(loadInitiativeEncounter);
+  const [encounter, setEncounter] = useState(initialState.encounter);
+  const [persistenceError, setPersistenceError] = useState(initialState.error);
+  const [shouldPersist, setShouldPersist] = useState(
+    initialState.error === null,
+  );
+  const [participantName, setParticipantName] = useState("");
+  const [participantType, setParticipantType] =
+    useState<InitiativeParticipantType>("character");
+  const [initiativeInput, setInitiativeInput] = useState("");
+  const [editingId, setEditingId] = useState<string | null>(null);
+  const [formError, setFormError] = useState<string | null>(null);
+
+  useEffect(() => {
+    if (!shouldPersist) return;
+    try {
+      window.localStorage.setItem(
+        INITIATIVE_STORAGE_KEY,
+        JSON.stringify(encounter),
+      );
+      setPersistenceError(null);
+    } catch {
+      setPersistenceError(
+        "La sauvegarde de la rencontre a échoué. Vos changements ne seront pas conservés après fermeture du navigateur.",
+      );
+    }
+  }, [encounter, shouldPersist]);
+
+  function updateEncounter(
+    update: (current: InitiativeEncounter) => InitiativeEncounter,
+  ) {
+    setShouldPersist(true);
+    setEncounter(update);
+  }
+
+  function clearForm() {
+    setParticipantName("");
+    setParticipantType("character");
+    setInitiativeInput("");
+    setEditingId(null);
+    setFormError(null);
+  }
+
+  function saveParticipant(event: FormEvent<HTMLFormElement>) {
+    event.preventDefault();
+    const name = participantName.trim();
+    const initiative = Number(initiativeInput);
+    if (!name) {
+      setFormError("Saisissez le nom du personnage ou du monstre.");
+      return;
+    }
+    if (
+      initiativeInput.trim() === "" ||
+      !Number.isFinite(initiative) ||
+      !Number.isInteger(initiative)
+    ) {
+      setFormError("Saisissez un score d’initiative entier.");
+      return;
+    }
+
+    const participant: InitiativeParticipant = {
+      id: editingId ?? crypto.randomUUID(),
+      name,
+      type: participantType,
+      initiative,
+    };
+    updateEncounter((current) => {
+      if (editingId) {
+        return {
+          ...current,
+          participants: current.participants.map((currentParticipant) =>
+            currentParticipant.id === editingId
+              ? participant
+              : currentParticipant,
+          ),
+        };
+      }
+
+      return {
+        ...current,
+        participants: [...current.participants, participant].sort(
+          (first, second) => second.initiative - first.initiative,
+        ),
+      };
+    });
+    clearForm();
+  }
+
+  function editParticipant(participant: InitiativeParticipant) {
+    setEditingId(participant.id);
+    setParticipantName(participant.name);
+    setParticipantType(participant.type);
+    setInitiativeInput(String(participant.initiative));
+    setFormError(null);
+  }
+
+  function removeParticipant(id: string) {
+    updateEncounter((current) => {
+      const participants = current.participants.filter(
+        (participant) => participant.id !== id,
+      );
+      return {
+        ...current,
+        participants,
+        activeParticipantId:
+          current.activeParticipantId === id
+            ? null
+            : current.activeParticipantId,
+        round: participants.length ? current.round : 1,
+      };
+    });
+    if (editingId === id) clearForm();
+  }
+
+  function moveParticipant(id: string, direction: -1 | 1) {
+    updateEncounter((current) => {
+      const index = current.participants.findIndex(
+        (participant) => participant.id === id,
+      );
+      const destination = index + direction;
+      if (index < 0 || destination < 0 || destination >= current.participants.length) {
+        return current;
+      }
+      const participants = [...current.participants];
+      [participants[index], participants[destination]] = [
+        participants[destination],
+        participants[index],
+      ];
+      return { ...current, participants };
+    });
+  }
+
+  function advanceTurn() {
+    updateEncounter((current) => {
+      if (!current.participants.length) return current;
+
+      const currentIndex = current.participants.findIndex(
+        (participant) => participant.id === current.activeParticipantId,
+      );
+      if (currentIndex < 0) {
+        return {
+          ...current,
+          activeParticipantId: current.participants[0].id,
+        };
+      }
+      if (currentIndex === current.participants.length - 1) {
+        return {
+          ...current,
+          activeParticipantId: current.participants[0].id,
+          round: current.round + 1,
+        };
+      }
+      return {
+        ...current,
+        activeParticipantId: current.participants[currentIndex + 1].id,
+      };
+    });
+  }
+
+  function finishInitiative() {
+    clearForm();
+    updateEncounter(() => emptyInitiativeEncounter());
+  }
+
+  return (
+    <section className="initiative-tracker" aria-labelledby="initiative-title">
+      <div className="initiative-heading">
+        <div>
+          <p className="eyebrow section-eyebrow">Suivi du combat</p>
+          <h2 id="initiative-title">Initiative</h2>
+        </div>
+        <div className="initiative-turn-controls">
+          <span className="initiative-round" aria-live="polite">
+            Tour {encounter.round}
+          </span>
+          <button
+            className="button button-primary"
+            type="button"
+            disabled={!encounter.participants.length}
+            onClick={advanceTurn}
+          >
+            Suivant <span aria-hidden="true">→</span>
+          </button>
+          <button
+            className="button button-secondary"
+            type="button"
+            disabled={!encounter.participants.length}
+            onClick={finishInitiative}
+          >
+            Terminer
+          </button>
+        </div>
+      </div>
+
+      {persistenceError && (
+        <p className="initiative-error" role="alert">
+          {persistenceError}
+        </p>
+      )}
+
+      <form className="initiative-form" onSubmit={saveParticipant}>
+        <label className="form-field">
+          <span>Nom du participant</span>
+          <input
+            autoComplete="off"
+            maxLength={80}
+            required
+            value={participantName}
+            onChange={(event) => {
+              setParticipantName(event.target.value);
+              setFormError(null);
+            }}
+            placeholder="Ex. Aelar ou gobelin"
+          />
+        </label>
+        <label className="form-field">
+          <span>Type</span>
+          <select
+            value={participantType}
+            onChange={(event) =>
+              setParticipantType(
+                event.target.value === "monster" ? "monster" : "character",
+              )
+            }
+          >
+            <option value="character">Personnage</option>
+            <option value="monster">Monstre</option>
+          </select>
+        </label>
+        <label className="form-field">
+          <span>Initiative</span>
+          <input
+            required
+            step="1"
+            type="number"
+            value={initiativeInput}
+            onChange={(event) => {
+              setInitiativeInput(event.target.value);
+              setFormError(null);
+            }}
+            placeholder="Ex. 15"
+          />
+        </label>
+        <div className="initiative-form-actions">
+          <button className="button button-primary" type="submit">
+            {editingId ? "Enregistrer" : "Ajouter"}
+          </button>
+          {editingId && (
+            <button
+              className="button button-secondary"
+              type="button"
+              onClick={clearForm}
+            >
+              Annuler
+            </button>
+          )}
+        </div>
+      </form>
+
+      {formError && (
+        <p className="initiative-error" role="alert">
+          {formError}
+        </p>
+      )}
+
+      {encounter.participants.length ? (
+        <ol className="initiative-participant-list">
+          {encounter.participants.map((participant, index) => {
+            const isActive = participant.id === encounter.activeParticipantId;
+            return (
+              <li
+                className={`initiative-participant${isActive ? " initiative-participant-active" : ""}`}
+                key={participant.id}
+                aria-current={isActive ? "true" : undefined}
+              >
+                <span className="initiative-score">
+                  {participant.initiative}
+                </span>
+                <div className="initiative-participant-info">
+                  <strong>{participant.name}</strong>
+                  <span>
+                    {participant.type === "character" ? "Personnage" : "Monstre"}
+                  </span>
+                </div>
+                {isActive && (
+                  <span className="initiative-active-label">À son tour</span>
+                )}
+                <div className="initiative-participant-actions">
+                  <button
+                    className="initiative-order-button"
+                    type="button"
+                    aria-label={`Monter ${participant.name}`}
+                    title="Monter dans la liste"
+                    disabled={index === 0}
+                    onClick={() => moveParticipant(participant.id, -1)}
+                  >
+                    ↑
+                  </button>
+                  <button
+                    className="initiative-order-button"
+                    type="button"
+                    aria-label={`Descendre ${participant.name}`}
+                    title="Descendre dans la liste"
+                    disabled={index === encounter.participants.length - 1}
+                    onClick={() => moveParticipant(participant.id, 1)}
+                  >
+                    ↓
+                  </button>
+                  <button
+                    className="initiative-text-button"
+                    type="button"
+                    onClick={() => editParticipant(participant)}
+                  >
+                    Modifier
+                  </button>
+                  <button
+                    className="initiative-text-button initiative-remove-button"
+                    type="button"
+                    onClick={() => removeParticipant(participant.id)}
+                  >
+                    Supprimer
+                  </button>
+                </div>
+              </li>
+            );
+          })}
+        </ol>
+      ) : (
+        <div className="initiative-empty">
+          <strong>Aucun participant pour le moment.</strong>
+          <span>Ajoutez les personnages et les monstres du combat.</span>
+        </div>
+      )}
+    </section>
+  );
+}
+
+function ToolsPage() {
+  const [selectedTool, setSelectedTool] = useState<"initiative" | "dice">(
+    "initiative",
+  );
+
+  return (
+    <section className="campaigns-page tools-page" aria-labelledby="tools-title">
+      <div className="campaigns-heading">
+        <div>
+          <p className="eyebrow">
+            <span className="eyebrow-line" />
+            Votre table de jeu
+          </p>
+          <h1 id="tools-title">
+            Outils de <em>jeu.</em>
+          </h1>
+          <p className="campaigns-intro">
+            Deux outils pour accompagner vos parties.
+          </p>
+        </div>
+      </div>
+      <div className="tools-category-grid" role="tablist" aria-label="Outils">
+        <button
+          className={`tools-category-card${selectedTool === "initiative" ? " tools-category-card-active" : ""}`}
+          id="initiative-tab"
+          type="button"
+          role="tab"
+          aria-selected={selectedTool === "initiative"}
+          aria-controls="tools-panel"
+          onClick={() => setSelectedTool("initiative")}
+        >
+          <span className="tools-category-number">01</span>
+          <h2>Initiative</h2>
+          <p>Gérez l’ordre d’action des participants au combat.</p>
+        </button>
+        <button
+          className={`tools-category-card${selectedTool === "dice" ? " tools-category-card-active" : ""}`}
+          id="dice-tab"
+          type="button"
+          role="tab"
+          aria-selected={selectedTool === "dice"}
+          aria-controls="tools-panel"
+          onClick={() => setSelectedTool("dice")}
+        >
+          <span className="tools-category-number">02</span>
+          <h2>Lancer de dés</h2>
+          <p>Lancez des dés virtuels pour vos parties.</p>
+          <span className="tools-category-status">À venir</span>
+        </button>
+      </div>
+      <div
+        className="tools-panel"
+        id="tools-panel"
+        role="tabpanel"
+        aria-labelledby={selectedTool === "initiative" ? "initiative-tab" : "dice-tab"}
+      >
+        {selectedTool === "initiative" ? (
+          <InitiativeTracker />
+        ) : (
+          <div className="tools-coming-soon">
+            <h2>Lancer de dés</h2>
+            <p>Cette catégorie sera disponible prochainement.</p>
+          </div>
+        )}
+      </div>
+    </section>
+  );
+}
+
 function App() {
-  const [page, setPage] = useState<"home" | "campaigns" | "encyclopedia">("home");
+  const [page, setPage] = useState<
+    "home" | "campaigns" | "encyclopedia" | "tools"
+  >("home");
   const [storedCampaigns] = useState(loadCampaigns);
   const [campaigns, setCampaigns] = useState(storedCampaigns.campaigns);
   const [storageError, setStorageError] = useState(storedCampaigns.error);
@@ -2085,6 +2597,10 @@ function App() {
 
   function openEncyclopedia() {
     setPage("encyclopedia");
+  }
+
+  function openTools() {
+    setPage("tools");
   }
 
   function openNewCampaign() {
@@ -2615,7 +3131,15 @@ function App() {
           <a className="nav-link" href="#personnages">
             Personnages
           </a>
-          <a className="nav-link" href="#outils">
+          <a
+            className={`nav-link${page === "tools" ? " nav-link-active" : ""}`}
+            href="#outils"
+            aria-current={page === "tools" ? "page" : undefined}
+            onClick={(event) => {
+              event.preventDefault();
+              openTools();
+            }}
+          >
             Outils
           </a>
         </nav>
@@ -2634,6 +3158,8 @@ function App() {
       <main>
         {page === "encyclopedia" ? (
           <EncyclopediaPage />
+        ) : page === "tools" ? (
+          <ToolsPage />
         ) : page === "campaigns" ? (
           <section className="campaigns-page" aria-labelledby="campaigns-title">
             <div className="campaigns-heading">
@@ -2857,7 +3383,7 @@ function App() {
                     <div className="notes-heading">
                       <div>
                         <p className="eyebrow section-eyebrow">Votre carnet</p>
-                        <h2>Notes de campagne</h2>
+                        <h2>Notes</h2>
                       </div>
                       <div className="notes-toolbar">
                         <label className="notes-sort">
@@ -3240,14 +3766,38 @@ function App() {
             <div className="art-spark spark-one">✦</div>
             <div className="art-spark spark-two">✧</div>
             <div className="die">
-              <svg viewBox="0 0 260 290" role="img" aria-label="Dé à vingt faces">
-                <path className="die-outline" d="m130 12 106 77-40 154-66 35-66-35L24 89 130 12Z" />
-                <path className="die-facet facet-top" d="m130 12 106 77H24L130 12Z" />
-                <path className="die-facet facet-left" d="M24 89h212l-40 154-66 35-66-35L24 89Z" />
-                <path className="die-facet facet-right" d="m130 12 40 154-40 122-66-35L24 89 130 12Z" />
-                <path className="die-line" d="m24 89 146 77 66-77M130 12v266m-66-35 106-89" />
-                <text x="130" y="146" textAnchor="middle">
-                  20
+              <svg viewBox="0 0 320 340" role="img" aria-label="Dé à vingt faces">
+                <defs>
+                  <linearGradient id="d20-shell" x1="0" y1="0" x2="1" y2="1">
+                    <stop offset="0" stopColor="#50664a" />
+                    <stop offset="0.5" stopColor="#263f33" />
+                    <stop offset="1" stopColor="#182e28" />
+                  </linearGradient>
+                  <linearGradient id="d20-center" x1="0" y1="0" x2="1" y2="1">
+                    <stop offset="0" stopColor="#70805b" />
+                    <stop offset="1" stopColor="#364f3d" />
+                  </linearGradient>
+                  <linearGradient id="d20-bottom" x1="0" y1="0" x2="0.9" y2="1">
+                    <stop offset="0" stopColor="#405b43" />
+                    <stop offset="1" stopColor="#20382f" />
+                  </linearGradient>
+                </defs>
+                <path
+                  className="die-outline"
+                  d="m160 14 81 46 45 79-17 87-55 63-54 37-54-37-55-63-17-87 45-79 81-46Z"
+                />
+                <path className="die-facet die-facet-left-top" d="m160 14-81 46-45 79 126 22Z" />
+                <path className="die-facet die-facet-left-mid" d="m160 14-126 125 17 87 109-7Z" />
+                <path className="die-facet die-facet-right-top" d="m160 14 81 46 45 79-126 22Z" />
+                <path className="die-facet die-facet-right-mid" d="m160 14 126 125-17 87-109-7Z" />
+                <path className="die-facet die-facet-left-low" d="m34 139 17 87 55 63 54-70Z" />
+                <path className="die-facet die-facet-left-bottom" d="m51 226 55 63 54 37v-107Z" />
+                <path className="die-facet die-facet-right-low" d="m286 139-17 87-55 63-54-70Z" />
+                <path className="die-facet die-facet-right-bottom" d="m269 226-55 63-54 37v-107Z" />
+                <path className="die-facet die-face-main" d="m160 14-109 212h218Z" />
+                <path className="die-facet die-face-bottom" d="m51 226 109 100 109-100Z" />
+                <text className="die-number die-number-main" x="160" y="167" textAnchor="middle">
+                  ✦
                 </text>
               </svg>
             </div>
@@ -3255,12 +3805,6 @@ function App() {
               <span className="caption-rule" />
               <span>À vous d’écrire la suite</span>
             </div>
-          </div>
-
-          <div className="hero-index" aria-hidden="true">
-            <span>01</span>
-            <span className="index-rule" />
-            <span>04</span>
           </div>
         </section>
 
@@ -3292,6 +3836,11 @@ function App() {
                       ? (event) => {
                           event.preventDefault();
                           openEncyclopedia();
+                        }
+                    : destination.id === "outils"
+                      ? (event) => {
+                          event.preventDefault();
+                          openTools();
                         }
                     : undefined
                 }
@@ -3335,6 +3884,7 @@ function App() {
         >
           Le Grimoire
         </a>
+        <span>Herebos - DCO 2026</span>
         <span>Un compagnon pour vos aventures, quelle que soit votre table.</span>
         <span className="footer-edition">Édition 2014 · 5e</span>
       </footer>

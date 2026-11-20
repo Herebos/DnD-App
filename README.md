@@ -10,8 +10,9 @@ Le Grimoire est une application web en français conçue pour aider les maîtres
 - Prendre des notes avec des tags, puis les trier par date ou par tag et rechercher un tag.
 - Enregistrer des liens web et des images; les liens s’ouvrent dans un nouvel onglet et les images s’affichent dans une galerie avec aperçu agrandi.
 - Parcourir et rechercher les créatures, sorts, équipements, objets magiques, classes, races, caractéristiques, conditions, règles et historiques de l’édition 2014 dans l’Encyclopédie, avec accès aux fiches détaillées de la D&D 5e API.
+- Suivre l’initiative d’un combat en ajoutant, modifiant, supprimant et réordonnant les personnages et monstres, avec sauvegarde locale et gestion des tours.
 
-Les rubriques Personnages, Outils de jeu et Mon compte sont présentées dans l’interface, mais ne sont pas encore des fonctionnalités complètes.
+La page Outils de jeu propose le suivi d’initiative; le lancer de dés reste à venir. Les rubriques Personnages et Mon compte sont présentées dans l’interface sans être encore des fonctionnalités complètes.
 
 ## Technologies
 
