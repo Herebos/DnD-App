@@ -102,6 +102,15 @@ type InitiativeEncounter = {
   round: number;
 };
 
+const dieTypes = [4, 6, 8, 10, 12, 100, 20] as const;
+type DieSides = (typeof dieTypes)[number];
+
+type RolledDie = {
+  id: string;
+  sides: DieSides;
+  result: number | null;
+};
+
 type StoredInitiativeEncounter = {
   encounter: InitiativeEncounter;
   error: string | null;
@@ -2098,6 +2107,8 @@ function InitiativeTracker() {
   const [initiativeInput, setInitiativeInput] = useState("");
   const [editingId, setEditingId] = useState<string | null>(null);
   const [formError, setFormError] = useState<string | null>(null);
+  const [isFinishConfirmationOpen, setIsFinishConfirmationOpen] =
+    useState(false);
 
   useEffect(() => {
     if (!shouldPersist) return;
@@ -2248,6 +2259,7 @@ function InitiativeTracker() {
   function finishInitiative() {
     clearForm();
     updateEncounter(() => emptyInitiativeEncounter());
+    setIsFinishConfirmationOpen(false);
   }
 
   return (
@@ -2273,7 +2285,7 @@ function InitiativeTracker() {
             className="button button-secondary"
             type="button"
             disabled={!encounter.participants.length}
-            onClick={finishInitiative}
+            onClick={() => setIsFinishConfirmationOpen(true)}
           >
             Terminer
           </button>
@@ -2419,6 +2431,205 @@ function InitiativeTracker() {
           <span>Ajoutez les personnages et les monstres du combat.</span>
         </div>
       )}
+
+      {isFinishConfirmationOpen && (
+        <div
+          className="campaign-modal-backdrop"
+          onMouseDown={(event) => {
+            if (event.target === event.currentTarget) {
+              setIsFinishConfirmationOpen(false);
+            }
+          }}
+        >
+          <section
+            className="campaign-modal initiative-confirmation-modal"
+            role="dialog"
+            aria-modal="true"
+            aria-labelledby="initiative-finish-title"
+            aria-describedby="initiative-finish-description"
+          >
+            <div className="campaign-modal-heading">
+              <div>
+                <p className="eyebrow section-eyebrow">Suivi du combat</p>
+                <h2 id="initiative-finish-title">Terminer l’initiative ?</h2>
+              </div>
+            </div>
+            <p id="initiative-finish-description">
+              Cette action supprimera les participants et réinitialisera l'initiative. Voulez-vous continuer ?
+            </p>
+            <div className="campaign-form-actions">
+              <button
+                className="button button-secondary"
+                type="button"
+                autoFocus
+                onClick={() => setIsFinishConfirmationOpen(false)}
+              >
+                Annuler
+              </button>
+              <button
+                className="button button-primary"
+                type="button"
+                onClick={finishInitiative}
+              >
+                Terminer le combat
+              </button>
+            </div>
+          </section>
+        </div>
+      )}
+    </section>
+  );
+}
+
+function DiceRoller() {
+  const [dice, setDice] = useState<RolledDie[]>([]);
+
+  function addDie(sides: DieSides) {
+    setDice((current) => [
+      ...current,
+      { id: crypto.randomUUID(), sides, result: null },
+    ]);
+  }
+
+  function rollDie(sides: DieSides) {
+    return Math.floor(Math.random() * sides) + 1;
+  }
+
+  function rerollDie(id: string) {
+    setDice((current) =>
+      current.map((die) =>
+        die.id === id ? { ...die, result: rollDie(die.sides) } : die,
+      ),
+    );
+  }
+
+  function rerollAll() {
+    setDice((current) =>
+      current.map((die) => ({ ...die, result: rollDie(die.sides) })),
+    );
+  }
+
+  function removeDie(id: string) {
+    setDice((current) => current.filter((die) => die.id !== id));
+  }
+
+  function shuffleDice() {
+    setDice((current) => {
+      const shuffled = [...current];
+      for (let index = shuffled.length - 1; index > 0; index -= 1) {
+        const destination = Math.floor(Math.random() * (index + 1));
+        [shuffled[index], shuffled[destination]] = [
+          shuffled[destination],
+          shuffled[index],
+        ];
+      }
+      return shuffled;
+    });
+  }
+
+  const total = dice.reduce((sum, die) => sum + (die.result ?? 0), 0);
+  const allDiceRolled = dice.length > 0 && dice.every((die) => die.result !== null);
+  const hasRolledDice = dice.some((die) => die.result !== null);
+
+  return (
+    <section className="dice-roller" aria-labelledby="dice-roller-title">
+      <div className="dice-roller-heading">
+        <div>
+          <p className="eyebrow section-eyebrow">À vous de jouer</p>
+          <h2 id="dice-roller-title">Lancer de dés</h2>
+        </div>
+        <div className="dice-roller-actions">
+          <button
+            className="button button-primary"
+            type="button"
+            disabled={!dice.length}
+            onClick={rerollAll}
+          >
+            {hasRolledDice ? "Relancer tout" : "Lancer les dés"}
+          </button>
+          <button
+            className="button button-secondary"
+            type="button"
+            disabled={dice.length < 2}
+            onClick={shuffleDice}
+          >
+            Mélanger
+          </button>
+          <button
+            className="button button-secondary"
+            type="button"
+            disabled={!dice.length}
+            onClick={() => setDice([])}
+          >
+            Effacer
+          </button>
+        </div>
+      </div>
+
+      <div className="dice-picker" aria-label="Ajouter un dé">
+        {dieTypes.map((sides) => (
+          <button
+            className="dice-picker-button"
+            key={sides}
+            type="button"
+            aria-label={`Ajouter un dé à ${sides} faces`}
+            onClick={() => addDie(sides)}
+          >
+            <span aria-hidden="true">+</span> d{sides}
+          </button>
+        ))}
+      </div>
+
+      {dice.length ? (
+        <>
+          <div className="dice-roll-summary" aria-live="polite">
+            <span>
+              {dice.length} {dice.length === 1 ? "dé" : "dés"}
+            </span>
+            {allDiceRolled && (
+              <strong>
+                Total <span>{total}</span>
+              </strong>
+            )}
+          </div>
+          <ol className="dice-list">
+            {dice.map((die, index) => (
+              <li className="dice-card" key={die.id}>
+                <span className="dice-card-index">
+                  {String(index + 1).padStart(2, "0")}
+                </span>
+                <div className="dice-card-result">
+                  <span>d{die.sides}</span>
+                  <strong>{die.result ?? "—"}</strong>
+                </div>
+                <div className="dice-card-actions">
+                  <button
+                    className="initiative-text-button"
+                    type="button"
+                    aria-label={`Relancer le d${die.sides}`}
+                    onClick={() => rerollDie(die.id)}
+                  >
+                    Relancer
+                  </button>
+                  <button
+                    className="initiative-text-button initiative-remove-button"
+                    type="button"
+                    aria-label={`Retirer le d${die.sides}`}
+                    onClick={() => removeDie(die.id)}
+                  >
+                    Retirer
+                  </button>
+                </div>
+              </li>
+            ))}
+          </ol>
+        </>
+      ) : (
+        <div className="dice-empty">
+          <strong>Aucun dé pour le moment.</strong>
+          <span>Choisissez un dé ci-dessus pour composer votre lancer.</span>
+        </div>
+      )}
     </section>
   );
 }
@@ -2469,8 +2680,7 @@ function ToolsPage() {
         >
           <span className="tools-category-number">02</span>
           <h2>Lancer de dés</h2>
-          <p>Lancez des dés virtuels pour vos parties.</p>
-          <span className="tools-category-status">À venir</span>
+          <p>Composez votre lancer avec tous les dés du jeu.</p>
         </button>
       </div>
       <div
@@ -2482,10 +2692,7 @@ function ToolsPage() {
         {selectedTool === "initiative" ? (
           <InitiativeTracker />
         ) : (
-          <div className="tools-coming-soon">
-            <h2>Lancer de dés</h2>
-            <p>Cette catégorie sera disponible prochainement.</p>
-          </div>
+          <DiceRoller />
         )}
       </div>
     </section>
