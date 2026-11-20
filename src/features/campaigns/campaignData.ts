@@ -1,3 +1,5 @@
+import { isRecord } from "../../utils/isRecord";
+
 export const campaignStatuses = [
   "En préparation",
   "En cours",
@@ -91,6 +93,10 @@ export type StoredCampaigns = {
 };
 
 export const STORAGE_KEY = "le-grimoire-campaigns";
+export const MAX_CAMPAIGN_IMPORT_BYTES = 4 * 1024 * 1024;
+
+const CAMPAIGN_EXPORT_FORMAT = "le-grimoire-campaigns";
+const CAMPAIGN_EXPORT_VERSION = 1;
 
 export function isCampaignStatus(value: unknown): value is CampaignStatus {
   return (
@@ -327,6 +333,85 @@ function migrateCampaign(value: unknown): Campaign | null {
     status: campaign.status,
     updatedAt: campaign.updatedAt,
   };
+}
+
+function hasUniqueIds(items: readonly { id: string }[]) {
+  const ids = items.map((item) => item.id);
+  return (
+    ids.every((id) => id.trim().length > 0 && id.length <= 128) &&
+    new Set(ids).size === ids.length
+  );
+}
+
+export function serializeCampaigns(campaigns: Campaign[]) {
+  return JSON.stringify(
+    {
+      format: CAMPAIGN_EXPORT_FORMAT,
+      version: CAMPAIGN_EXPORT_VERSION,
+      exportedAt: new Date().toISOString(),
+      campaigns,
+    },
+    null,
+    2,
+  );
+}
+
+export function parseCampaignImport(jsonText: string): Campaign[] {
+  if (new TextEncoder().encode(jsonText).byteLength > MAX_CAMPAIGN_IMPORT_BYTES) {
+    throw new Error("Le fichier dépasse la taille maximale autorisée de 4 Mo.");
+  }
+
+  let parsed: unknown;
+  try {
+    parsed = JSON.parse(jsonText);
+  } catch {
+    throw new Error("Le fichier sélectionné ne contient pas un JSON valide.");
+  }
+
+  if (
+    !isRecord(parsed) ||
+    parsed.format !== CAMPAIGN_EXPORT_FORMAT ||
+    parsed.version !== CAMPAIGN_EXPORT_VERSION ||
+    !isValidDate(parsed.exportedAt) ||
+    !Array.isArray(parsed.campaigns)
+  ) {
+    throw new Error(
+      "Le fichier ne correspond pas à une sauvegarde de campagnes reconnue.",
+    );
+  }
+  if (parsed.campaigns.length === 0) {
+    throw new Error("La sauvegarde ne contient aucune campagne à importer.");
+  }
+
+  const campaigns = parsed.campaigns.map(migrateCampaign);
+  if (campaigns.some((campaign) => campaign === null)) {
+    throw new Error(
+      "La sauvegarde contient une campagne invalide ou incompatible. Aucune campagne n’a été importée.",
+    );
+  }
+
+  const validatedCampaigns = campaigns.filter(
+    (campaign): campaign is Campaign => campaign !== null,
+  );
+  if (!hasUniqueIds(validatedCampaigns)) {
+    throw new Error("La sauvegarde contient des identifiants de campagne en double.");
+  }
+  for (const campaign of validatedCampaigns) {
+    const collections = [
+      campaign.players,
+      campaign.summaries,
+      campaign.notes,
+      campaign.links,
+      campaign.images,
+    ];
+    if (collections.some((items) => !hasUniqueIds(items))) {
+      throw new Error(
+        "Une campagne contient des identifiants vides, trop longs ou en double.",
+      );
+    }
+  }
+
+  return validatedCampaigns;
 }
 
 export function loadCampaigns(): StoredCampaigns {

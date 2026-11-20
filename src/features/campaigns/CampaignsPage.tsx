@@ -1,4 +1,10 @@
-import { useEffect, useState, type FormEvent } from "react";
+import {
+  useEffect,
+  useRef,
+  useState,
+  type ChangeEvent,
+  type FormEvent,
+} from "react";
 import MarkdownContent from "../../components/MarkdownContent";
 import {
   emptyForm,
@@ -9,8 +15,11 @@ import {
   isCampaignStatus,
   isValidWebUrl,
   loadCampaigns,
+  MAX_CAMPAIGN_IMPORT_BYTES,
   officialClasses,
+  parseCampaignImport,
   parseTags,
+  serializeCampaigns,
   STORAGE_KEY,
   type Campaign,
   type CampaignForm,
@@ -33,9 +42,23 @@ export default function CampaignsPage({
   selectionReset,
 }: CampaignsPageProps) {
   const [storedCampaigns] = useState(loadCampaigns);
-  const [campaigns, setCampaigns] = useState(storedCampaigns.campaigns);
+  const [campaigns, setCampaignsState] = useState(storedCampaigns.campaigns);
+  const campaignsRef = useRef(campaigns);
   const [storageError, setStorageError] = useState(storedCampaigns.error);
   const [shouldPersist, setShouldPersist] = useState(!storedCampaigns.error);
+  const [pendingCampaignImport, setPendingCampaignImport] = useState<{
+    fileName: string;
+    resultCampaigns: Campaign[];
+    conflicts: Campaign[];
+    conflictIndex: number;
+    importedCount: number;
+  } | null>(null);
+  const [campaignImportError, setCampaignImportError] = useState<string | null>(
+    null,
+  );
+  const [campaignImportSuccess, setCampaignImportSuccess] = useState<
+    string | null
+  >(null);
   const [isFormOpen, setIsFormOpen] = useState(false);
   const [editingId, setEditingId] = useState<string | null>(null);
   const [selectedId, setSelectedId] = useState<string | null>(null);
@@ -79,6 +102,19 @@ export default function CampaignsPage({
     null,
   );
 
+  function updateCampaigns(update: (current: Campaign[]) => Campaign[]) {
+    setCampaignsState((current) => {
+      const next = update(current);
+      campaignsRef.current = next;
+      return next;
+    });
+  }
+
+  function replaceCampaigns(updatedCampaigns: Campaign[]) {
+    campaignsRef.current = updatedCampaigns;
+    setCampaignsState(updatedCampaigns);
+  }
+
   useEffect(() => {
     if (!shouldPersist) return;
     try {
@@ -99,7 +135,8 @@ export default function CampaignsPage({
       !isResourceFormOpen &&
       !isPlayerFormOpen &&
       !lightboxImage &&
-      !viewingSummary
+      !viewingSummary &&
+      !pendingCampaignImport
     ) {
       return;
     }
@@ -112,6 +149,7 @@ export default function CampaignsPage({
         setIsPlayerFormOpen(false);
         setLightboxImage(null);
         setViewingSummary(null);
+        setPendingCampaignImport(null);
       }
     }
     window.addEventListener("keydown", closeOnEscape);
@@ -124,6 +162,7 @@ export default function CampaignsPage({
     isPlayerFormOpen,
     lightboxImage,
     viewingSummary,
+    pendingCampaignImport,
   ]);
 
 
@@ -137,6 +176,132 @@ export default function CampaignsPage({
     setPlayersInput("");
     setCampaignFormError(null);
     setIsFormOpen(true);
+  }
+
+  function exportCampaigns() {
+    const campaignsToExport = selectedCampaign
+      ? [selectedCampaign]
+      : campaigns;
+    if (!campaignsToExport.length) return;
+
+    const blob = new Blob([serializeCampaigns(campaignsToExport)], {
+      type: "application/json",
+    });
+    const downloadUrl = URL.createObjectURL(blob);
+    const downloadLink = document.createElement("a");
+    downloadLink.href = downloadUrl;
+    const exportName = selectedCampaign
+      ? selectedCampaign.name
+          .normalize("NFD")
+          .replace(/[\u0300-\u036f]/g, "")
+          .replace(/[^a-zA-Z0-9]+/g, "-")
+          .replace(/^-|-$/g, "")
+          .toLowerCase() || "campagne"
+      : "campagnes";
+    downloadLink.download = `le-grimoire-${exportName}-${new Date().toISOString().slice(0, 10)}.json`;
+    document.body.append(downloadLink);
+    downloadLink.click();
+    downloadLink.remove();
+    window.setTimeout(() => URL.revokeObjectURL(downloadUrl), 0);
+  }
+
+  async function importCampaigns(event: ChangeEvent<HTMLInputElement>) {
+    const input = event.currentTarget;
+    const file = input.files?.[0];
+    input.value = "";
+    if (!file) return;
+
+    setCampaignImportError(null);
+    setCampaignImportSuccess(null);
+    setPendingCampaignImport(null);
+    if (file.size > MAX_CAMPAIGN_IMPORT_BYTES) {
+      setCampaignImportError("Le fichier dépasse la taille maximale autorisée de 4 Mo.");
+      return;
+    }
+
+    try {
+      const importedCampaigns = parseCampaignImport(await file.text());
+      const currentCampaigns = campaignsRef.current;
+      const conflicts = importedCampaigns.filter((importedCampaign) =>
+        currentCampaigns.some(
+          (campaign) => campaign.id === importedCampaign.id,
+        ),
+      );
+      const nonConflictingCampaigns = importedCampaigns.filter(
+        (importedCampaign) =>
+          !currentCampaigns.some(
+            (campaign) => campaign.id === importedCampaign.id,
+          ),
+      );
+
+      if (conflicts.length) {
+        setPendingCampaignImport({
+          fileName: file.name,
+          resultCampaigns: [...currentCampaigns, ...nonConflictingCampaigns],
+          conflicts,
+          conflictIndex: 0,
+          importedCount: importedCampaigns.length,
+        });
+      } else {
+        applyCampaignImport(
+          [...currentCampaigns, ...importedCampaigns],
+          importedCampaigns.length,
+        );
+      }
+    } catch (error) {
+      setCampaignImportError(
+        error instanceof Error
+          ? error.message
+          : "Impossible de lire le fichier de sauvegarde sélectionné.",
+      );
+    }
+  }
+
+  function applyCampaignImport(importedCampaigns: Campaign[], importedCount: number) {
+    replaceCampaigns(importedCampaigns);
+    setShouldPersist(true);
+    setPendingCampaignImport(null);
+    setCampaignImportError(null);
+    setCampaignImportSuccess(
+      `${importedCount} ${importedCount === 1 ? "campagne importée" : "campagnes importées"}.`,
+    );
+  }
+
+  function resolveCampaignImportConflict(choice: "replace" | "copy") {
+    if (!pendingCampaignImport) return;
+
+    const importedCampaign =
+      pendingCampaignImport.conflicts[pendingCampaignImport.conflictIndex];
+    let resultCampaigns = pendingCampaignImport.resultCampaigns;
+    if (choice === "replace") {
+      resultCampaigns = resultCampaigns.map((campaign) =>
+        campaign.id === importedCampaign.id ? importedCampaign : campaign,
+      );
+    } else {
+      const copySuffix = " (copie)";
+      const copyName = `${importedCampaign.name
+        .slice(0, 80 - copySuffix.length)
+        .trimEnd()}${copySuffix}`;
+      let newId = crypto.randomUUID();
+      while (resultCampaigns.some((campaign) => campaign.id === newId)) {
+        newId = crypto.randomUUID();
+      }
+      resultCampaigns = [
+        ...resultCampaigns,
+        { ...importedCampaign, id: newId, name: copyName },
+      ];
+    }
+
+    const nextConflictIndex = pendingCampaignImport.conflictIndex + 1;
+    if (nextConflictIndex < pendingCampaignImport.conflicts.length) {
+      setPendingCampaignImport({
+        ...pendingCampaignImport,
+        resultCampaigns,
+        conflictIndex: nextConflictIndex,
+      });
+      return;
+    }
+    applyCampaignImport(resultCampaigns, pendingCampaignImport.importedCount);
   }
 
   function openEditCampaign(campaign: Campaign) {
@@ -199,7 +364,7 @@ export default function CampaignsPage({
       updatedAt,
     };
 
-    setCampaigns((current) =>
+    updateCampaigns((current) =>
       editingId
         ? current.map((item) => (item.id === editingId ? campaign : item))
         : [campaign, ...current],
@@ -218,7 +383,7 @@ export default function CampaignsPage({
     ) {
       return;
     }
-    setCampaigns((current) =>
+    updateCampaigns((current) =>
       current.filter((item) => item.id !== campaign.id),
     );
     setShouldPersist(true);
@@ -239,7 +404,7 @@ export default function CampaignsPage({
     update: (campaign: Campaign) => Campaign,
   ) {
     if (!selectedId) return;
-    setCampaigns((current) =>
+    updateCampaigns((current) =>
       current.map((campaign) =>
         campaign.id === selectedId
           ? update({ ...campaign, updatedAt: new Date().toISOString() })
@@ -614,6 +779,15 @@ export default function CampaignsPage({
     );
   }
 
+  const currentImportConflict = pendingCampaignImport
+    ? pendingCampaignImport.conflicts[pendingCampaignImport.conflictIndex]
+    : null;
+  const existingImportConflict = currentImportConflict
+    ? pendingCampaignImport?.resultCampaigns.find(
+        (campaign) => campaign.id === currentImportConflict.id,
+      )
+    : null;
+
   return (
     <>
       <section className="campaigns-page" hidden={hidden} aria-labelledby="campaigns-title">
@@ -649,17 +823,53 @@ export default function CampaignsPage({
                 : "Rassemblez vos aventures, vos joueurs et vos notes au même endroit."}
             </p>
           </div>
-          {!selectedCampaign && (
+          <div className="campaign-data-actions">
             <button
-              className="button button-primary campaign-create"
+              className="button button-secondary"
               type="button"
-              onClick={openNewCampaign}
+              disabled={!selectedCampaign && !campaigns.length}
+              onClick={exportCampaigns}
             >
-              <span aria-hidden="true">＋</span>
-              Créer une campagne
+              {selectedCampaign
+                ? "Exporter cette campagne"
+                : "Exporter toutes les campagnes"}
             </button>
-          )}
+            <label className="button button-secondary campaign-import-control">
+              Importer JSON
+              <input
+                className="visually-hidden"
+                type="file"
+                accept=".json,application/json"
+                aria-label="Importer une sauvegarde JSON de campagnes"
+                onChange={importCampaigns}
+              />
+            </label>
+            {!selectedCampaign && (
+              <button
+                className="button button-primary campaign-create"
+                type="button"
+                onClick={openNewCampaign}
+              >
+                <span aria-hidden="true">＋</span>
+                Créer une campagne
+              </button>
+            )}
+          </div>
         </div>
+
+        {campaignImportError && (
+          <p className="campaign-import-feedback campaign-import-error" role="alert">
+            {campaignImportError}
+          </p>
+        )}
+        {campaignImportSuccess && (
+          <p
+            className="campaign-import-feedback campaign-import-success"
+            role="status"
+          >
+            {campaignImportSuccess}
+          </p>
+        )}
 
         {storageError && (
           <p className="storage-message" role="status">
@@ -1824,6 +2034,68 @@ export default function CampaignsPage({
             {lightboxImage.caption && (
               <p className="lightbox-caption">{lightboxImage.caption}</p>
             )}
+          </section>
+        </div>
+      )}
+      {pendingCampaignImport &&
+        currentImportConflict &&
+        existingImportConflict && (
+        <div
+          className="campaign-modal-backdrop"
+          onMouseDown={(event) => {
+            if (event.target === event.currentTarget) {
+              setPendingCampaignImport(null);
+            }
+          }}
+        >
+          <section
+            className="campaign-modal campaign-import-confirmation"
+            role="dialog"
+            aria-modal="true"
+            aria-labelledby="campaign-import-conflict-title"
+            aria-describedby="campaign-import-conflict-description"
+          >
+            <div className="campaign-modal-heading">
+              <div>
+                <p className="eyebrow section-eyebrow">
+                  Conflit {pendingCampaignImport.conflictIndex + 1} sur{" "}
+                  {pendingCampaignImport.conflicts.length}
+                </p>
+                <h2 id="campaign-import-conflict-title">
+                  Identifiant déjà utilisé
+                </h2>
+              </div>
+            </div>
+            <p id="campaign-import-conflict-description">
+              La campagne « {currentImportConflict.name} » du fichier{" "}
+              « {pendingCampaignImport.fileName} » partage son identifiant avec
+              « {existingImportConflict.name} ». Choisis comment traiter ce
+              conflit :
+            </p>
+            <div className="campaign-form-actions">
+              <button
+                className="button button-secondary"
+                type="button"
+                autoFocus
+                onClick={() => setPendingCampaignImport(null)}
+              >
+                Annuler l’import
+              </button>
+              <button
+                className="button button-secondary"
+                type="button"
+                onClick={() => resolveCampaignImportConflict("copy")}
+              >
+                Importer comme copie
+              </button>
+              <button
+                className="button button-danger"
+                type="button"
+                onClick={() => resolveCampaignImportConflict("replace")}
+              >
+                Remplacer la campagne
+              </button>
+            </div>
           </section>
         </div>
       )}

@@ -1759,6 +1759,30 @@ a {
   margin-bottom: 2px;
 }
 
+.campaign-data-actions {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 8px;
+}
+
+.campaign-data-actions .button:disabled {
+  cursor: not-allowed;
+  opacity: 0.5;
+  transform: none;
+}
+
+.campaign-import-control {
+  position: relative;
+  cursor: pointer;
+}
+
+.campaign-import-control:focus-within {
+  outline: 2px solid #987044;
+  outline-offset: 3px;
+}
+
 .campaign-create > span {
   color: #d3b479;
   font-size: 17px;
@@ -2769,6 +2793,33 @@ a {
   line-height: 1.6;
 }
 
+.campaign-import-feedback {
+  margin: -25px 0 24px;
+  padding: 11px 14px;
+  border: 1px solid;
+  font-size: 11px;
+  line-height: 1.6;
+}
+
+.campaign-import-error {
+  border-color: #e2c9b9;
+  color: #865944;
+  background: #f7ece4;
+}
+
+.campaign-import-success {
+  border-color: #cbd6c7;
+  color: #49624f;
+  background: #eef3eb;
+}
+
+.campaign-import-confirmation > p {
+  margin: 18px 0;
+  color: #686b62;
+  font-size: 12px;
+  line-height: 1.7;
+}
+
 .campaign-modal-backdrop {
   position: fixed;
   z-index: 20;
@@ -3474,6 +3525,10 @@ a {
 
   .campaign-create {
     min-height: 44px;
+  }
+
+  .campaign-data-actions {
+    justify-content: flex-start;
   }
 
   .campaign-grid {
