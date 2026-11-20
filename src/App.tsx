@@ -542,6 +542,10 @@ function formatEncyclopediaDescription(value: string | string[]) {
   }, "");
 }
 
+function formatSpecialAbilityDescription(value: string) {
+  return value.replace(/\n([^\n.]+\.)\s/g, "\n**$1** ");
+}
+
 function getEncyclopediaEntryMeta(
   entry: EncyclopediaEntry,
   category: EncyclopediaCategoryId,
@@ -1776,7 +1780,17 @@ function EncyclopediaPage() {
                     {content.map((item, index) => (
                       <div className="encyclopedia-detail-entry" key={`${key}-${index}`}>
                         {item.title && <h4>{item.title}</h4>}
-                        {item.description && <p>{item.description}</p>}
+                        {item.description &&
+                          (key === "special_abilities" ? (
+                            <MarkdownContent
+                              className="encyclopedia-special-ability-description"
+                              content={formatSpecialAbilityDescription(
+                                item.description,
+                              )}
+                            />
+                          ) : (
+                            <p>{item.description}</p>
+                          ))}
                       </div>
                     ))}
                   </section>
