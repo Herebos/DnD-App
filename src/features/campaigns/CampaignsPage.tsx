@@ -20,7 +20,6 @@ import {
   parseCampaignImport,
   parseTags,
   serializeCampaigns,
-  STORAGE_KEY,
   type Campaign,
   type CampaignForm,
   type CampaignImage,
@@ -35,13 +34,15 @@ import {
 type CampaignsPageProps = {
   hidden: boolean;
   selectionReset: number;
+  storageKey: string;
 };
 
 export default function CampaignsPage({
   hidden,
   selectionReset,
+  storageKey,
 }: CampaignsPageProps) {
-  const [storedCampaigns] = useState(loadCampaigns);
+  const [storedCampaigns] = useState(() => loadCampaigns(storageKey));
   const [campaigns, setCampaignsState] = useState(storedCampaigns.campaigns);
   const campaignsRef = useRef(campaigns);
   const [storageError, setStorageError] = useState(storedCampaigns.error);
@@ -118,14 +119,14 @@ export default function CampaignsPage({
   useEffect(() => {
     if (!shouldPersist) return;
     try {
-      window.localStorage.setItem(STORAGE_KEY, JSON.stringify(campaigns));
+      window.localStorage.setItem(storageKey, JSON.stringify(campaigns));
       setStorageError(null);
     } catch {
       setStorageError(
         "La sauvegarde locale a échoué. Vos changements ne seront pas conservés après fermeture du navigateur.",
       );
     }
-  }, [campaigns, shouldPersist]);
+  }, [campaigns, shouldPersist, storageKey]);
 
   useEffect(() => {
     if (

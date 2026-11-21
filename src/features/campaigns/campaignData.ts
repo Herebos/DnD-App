@@ -414,9 +414,9 @@ export function parseCampaignImport(jsonText: string): Campaign[] {
   return validatedCampaigns;
 }
 
-export function loadCampaigns(): StoredCampaigns {
+export function loadCampaigns(storageKey = STORAGE_KEY): StoredCampaigns {
   try {
-    const stored = window.localStorage.getItem(STORAGE_KEY);
+    const stored = window.localStorage.getItem(storageKey);
     if (!stored) return { campaigns: [], error: null };
 
     const parsed: unknown = JSON.parse(stored);

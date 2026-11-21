@@ -12,13 +12,14 @@ Le Grimoire est une application web en français conçue pour aider les maîtres
 - Parcourir et rechercher les créatures, sorts, équipements, objets magiques, classes, races, caractéristiques, conditions, règles et historiques de l’édition 2014 dans l’Encyclopédie, avec accès aux fiches détaillées de la D&D 5e API.
 - Suivre l’initiative d’un combat en ajoutant, modifiant, supprimant et réordonnant les personnages et monstres, avec sauvegarde locale et gestion des tours.
 
-La page Outils de jeu propose le suivi d’initiative; le lancer de dés reste à venir. Les rubriques Personnages et Mon compte sont présentées dans l’interface sans être encore des fonctionnalités complètes.
+La page Outils de jeu propose le suivi d’initiative; le lancer de dés reste à venir. Les fiches de personnage sont accessibles depuis les campagnes; la gestion indépendante des personnages n’est pas encore disponible.
 
 ## Technologies
 
 - **React 19** pour l’interface.
 - **TypeScript** pour le typage du code.
 - **Vite 6** pour le serveur de développement et la compilation.
+- **Netlify Identity** pour la création de compte, la connexion et la déconnexion.
 - **react-markdown**, **remark-gfm**, **rehype-raw** et **rehype-sanitize** pour afficher le Markdown des résumés avec assainissement du HTML.
 
 ## Prérequis
@@ -51,7 +52,11 @@ npm run preview  # Prévisualisation de la compilation
 
 ## Données et sécurité
 
-Les campagnes sont enregistrées dans le `localStorage` du navigateur. Elles restent donc sur cet appareil et dans ce navigateur : il n’y a actuellement ni compte utilisateur, ni serveur, ni synchronisation entre appareils. Effacer les données du navigateur peut supprimer les campagnes enregistrées.
+Netlify Identity doit être activé dans les paramètres du site Netlify. Les pages Campagnes et Personnages nécessitent un compte; l’inscription peut aussi être soumise aux réglages de confirmation ou d’invitation configurés dans Netlify Identity.
+
+Les campagnes sont enregistrées dans le `localStorage` du navigateur, sous une clé propre à l’identifiant Netlify de chaque compte. Elles restent sur cet appareil et dans ce navigateur : il n’y a pas de serveur de données ni de synchronisation entre appareils. Les anciennes campagnes enregistrées avant l’ajout des comptes sous la clé `le-grimoire-campaigns` ne sont pas migrées automatiquement. Effacer les données du navigateur peut supprimer les campagnes enregistrées.
+
+La connexion contrôle l’accès dans l’interface, mais les campagnes demeurent des données locales modifiables depuis le navigateur; elle ne constitue pas une protection serveur. Une autorisation réellement confidentielle ou une synchronisation nécessite de stocker et vérifier les données côté serveur.
 
 Les champs sont validés avant leur enregistrement, les URL de ressources sont limitées aux protocoles HTTP et HTTPS, et le contenu Markdown est assaini avant affichage. Une politique de sécurité du contenu (CSP) est également définie dans `index.html`.
 

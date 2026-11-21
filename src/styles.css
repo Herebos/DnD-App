@@ -134,9 +134,16 @@ a {
   color: var(--green);
   font-size: 12px;
   font-weight: 600;
+  font-family: inherit;
+  cursor: pointer;
   transition:
     border-color 160ms ease,
     background 160ms ease;
+}
+
+.account-link:disabled {
+  cursor: wait;
+  opacity: 0.65;
 }
 
 .account-link:hover {
@@ -3222,12 +3229,151 @@ a {
   font-size: 10px;
 }
 
+.account-callout-action {
+  flex: 0 0 auto;
+  margin-left: auto;
+  cursor: pointer;
+}
+
 .callout-note {
   margin-left: auto;
   color: #8b887b;
   font-family: var(--serif);
   font-size: 12px;
   font-style: italic;
+}
+
+.protected-access {
+  display: grid;
+  place-items: center;
+}
+
+.protected-access-card {
+  width: min(100%, 620px);
+  padding: clamp(28px, 6vw, 58px);
+  border: 1px solid var(--line);
+  background: rgb(255 255 255 / 35%);
+  text-align: center;
+}
+
+.protected-access-mark {
+  display: grid;
+  width: 52px;
+  height: 52px;
+  margin: 0 auto 20px;
+  place-items: center;
+  border: 1px solid #c8b58f;
+  border-radius: 50%;
+  color: #a47d46;
+  font-size: 22px;
+}
+
+.protected-access-card .eyebrow {
+  justify-content: center;
+}
+
+.protected-access-card h1 {
+  margin: 16px 0 12px;
+  color: var(--green-dark);
+  font-family: var(--serif);
+  font-size: clamp(30px, 4vw, 42px);
+  font-weight: 500;
+  line-height: 1.15;
+}
+
+.protected-access-card > p:not(.eyebrow) {
+  margin: 0;
+  color: var(--muted);
+  font-size: 13px;
+  line-height: 1.75;
+}
+
+.protected-access-card > .button {
+  margin-top: 23px;
+  cursor: pointer;
+}
+
+.protected-access-actions {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  flex-wrap: wrap;
+  gap: 20px;
+  margin-top: 23px;
+}
+
+.protected-access-actions .button,
+.account-callout-action {
+  cursor: pointer;
+}
+
+.protected-access-actions .text-link {
+  border: 0;
+  background: transparent;
+  cursor: pointer;
+  font: inherit;
+}
+
+.auth-modal {
+  width: min(100%, 460px);
+}
+
+.auth-modal .campaign-form-actions .button {
+  width: 100%;
+}
+
+.auth-modal .campaign-form-actions .button:disabled,
+.auth-modal .modal-close:disabled,
+.auth-mode-switch button:disabled {
+  cursor: wait;
+  opacity: 0.65;
+}
+
+.auth-form-message {
+  margin: 0;
+  padding: 11px 12px;
+  border: 1px solid;
+  font-size: 11px;
+  line-height: 1.6;
+}
+
+.auth-form-error,
+.auth-global-error {
+  border-color: #e4c9bd;
+  color: #874b3d;
+  background: #f8eee9;
+}
+
+.auth-form-success {
+  border-color: #cbd6c7;
+  color: #49624f;
+  background: #eef3eb;
+}
+
+.auth-global-error {
+  margin: 18px 0;
+  padding: 12px 15px;
+  border: 1px solid;
+  font-size: 12px;
+  line-height: 1.6;
+}
+
+.auth-mode-switch {
+  margin: 19px 0 0;
+  color: var(--muted);
+  font-size: 11px;
+  text-align: center;
+}
+
+.auth-mode-switch button {
+  margin-left: 5px;
+  padding: 0;
+  border: 0;
+  color: #8d744d;
+  background: transparent;
+  cursor: pointer;
+  font: inherit;
+  font-weight: 600;
 }
 
 .site-footer {

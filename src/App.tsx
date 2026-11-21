@@ -1,7 +1,43 @@
-import { useState } from "react";
+import {
+  useEffect,
+  useState,
+  type FormEvent,
+} from "react";
+import {
+  getUser,
+  handleAuthCallback,
+  login,
+  logout,
+  onAuthChange,
+  signup,
+  type User,
+} from "@netlify/identity";
 import ToolsPage from "./features/tools/ToolsPage";
 import EncyclopediaPage from "./features/encyclopedia/EncyclopediaPage";
 import CampaignsPage from "./features/campaigns/CampaignsPage";
+import { STORAGE_KEY } from "./features/campaigns/campaignData";
+
+type AuthDialogMode = "login" | "signup";
+
+let identityInitialization: Promise<User | null> | null = null;
+
+function initializeIdentity() {
+  if (!identityInitialization) {
+    identityInitialization = handleAuthCallback()
+      .then(() => getUser())
+      .catch((error: unknown) => {
+        identityInitialization = null;
+        throw error;
+      });
+  }
+  return identityInitialization;
+}
+
+function getErrorMessage(error: unknown) {
+  return error instanceof Error
+    ? error.message
+    : "Une erreur inattendue est survenue. Réessayez.";
+}
 
 const destinations = [
   {
@@ -36,13 +72,49 @@ const destinations = [
 
 function App() {
   const [page, setPage] = useState<
-    "home" | "campaigns" | "encyclopedia" | "tools"
+    "home" | "campaigns" | "characters" | "encyclopedia" | "tools"
   >("home");
   const [campaignSelectionReset, setCampaignSelectionReset] = useState(0);
+  const [user, setUser] = useState<User | null>(null);
+  const [isIdentityLoading, setIsIdentityLoading] = useState(true);
+  const [identityError, setIdentityError] = useState<string | null>(null);
+  const [authDialogMode, setAuthDialogMode] =
+    useState<AuthDialogMode | null>(null);
+  const [authEmail, setAuthEmail] = useState("");
+  const [authPassword, setAuthPassword] = useState("");
+  const [authMessage, setAuthMessage] = useState<string | null>(null);
+  const [isAuthSubmitting, setIsAuthSubmitting] = useState(false);
+
+  useEffect(() => {
+    const unsubscribe = onAuthChange((_event, nextUser) => {
+      setUser(nextUser);
+      setIsIdentityLoading(false);
+      if (nextUser) {
+        setAuthDialogMode(null);
+        setIdentityError(null);
+      }
+    });
+
+    initializeIdentity()
+      .then((currentUser) => {
+        setUser(currentUser);
+        setIsIdentityLoading(false);
+      })
+      .catch((error: unknown) => {
+        setIdentityError(getErrorMessage(error));
+        setIsIdentityLoading(false);
+      });
+
+    return unsubscribe;
+  }, []);
 
   function openCampaigns() {
     setPage("campaigns");
     setCampaignSelectionReset((current) => current + 1);
+  }
+
+  function openCharacters() {
+    setPage("characters");
   }
 
   function openEncyclopedia() {
@@ -51,6 +123,55 @@ function App() {
 
   function openTools() {
     setPage("tools");
+  }
+
+  function openAuthDialog(mode: AuthDialogMode) {
+    setAuthDialogMode(mode);
+    setAuthMessage(null);
+    setIdentityError(null);
+  }
+
+  async function submitAuth(event: FormEvent<HTMLFormElement>) {
+    event.preventDefault();
+    if (!authDialogMode) return;
+
+    setIsAuthSubmitting(true);
+    setIdentityError(null);
+    setAuthMessage(null);
+    try {
+      if (authDialogMode === "login") {
+        const loggedInUser = await login(authEmail.trim(), authPassword);
+        setUser(loggedInUser);
+        setAuthDialogMode(null);
+      } else {
+        await signup(authEmail.trim(), authPassword);
+        const currentUser = await getUser();
+        if (currentUser) {
+          setUser(currentUser);
+          setAuthDialogMode(null);
+        } else {
+          setAuthPassword("");
+          setAuthMessage(
+            "Compte créé. Vérifiez votre boîte mail pour confirmer l’adresse avant de vous connecter.",
+          );
+        }
+      }
+    } catch (error: unknown) {
+      setIdentityError(getErrorMessage(error));
+    } finally {
+      setIsAuthSubmitting(false);
+    }
+  }
+
+  async function signOut() {
+    setIdentityError(null);
+    try {
+      await logout();
+      setUser(null);
+      setPage("home");
+    } catch (error: unknown) {
+      setIdentityError(getErrorMessage(error));
+    }
   }
 
   return (
@@ -85,6 +206,17 @@ function App() {
             Campagnes
           </a>
           <a
+            className={`nav-link${page === "characters" ? " nav-link-active" : ""}`}
+            href="#personnages"
+            aria-current={page === "characters" ? "page" : undefined}
+            onClick={(event) => {
+              event.preventDefault();
+              openCharacters();
+            }}
+          >
+            Personnages
+          </a>
+          <a
             className={`nav-link${page === "encyclopedia" ? " nav-link-active" : ""}`}
             href="#encyclopedie"
             aria-current={page === "encyclopedia" ? "page" : undefined}
@@ -94,9 +226,6 @@ function App() {
             }}
           >
             Encyclopédie
-          </a>
-          <a className="nav-link" href="#personnages">
-            Personnages
           </a>
           <a
             className={`nav-link${page === "tools" ? " nav-link-active" : ""}`}
@@ -111,22 +240,103 @@ function App() {
           </a>
         </nav>
 
-        <a className="account-link" href="#mon-compte">
+        {user ? (
+          <button className="account-link" type="button" onClick={signOut}>
           <span className="account-icon" aria-hidden="true">
             <svg viewBox="0 0 24 24" fill="none">
               <circle cx="12" cy="8" r="3.25" />
               <path d="M5.5 20c.45-3.1 2.95-5.25 6.5-5.25s6.05 2.15 6.5 5.25" />
             </svg>
           </span>
-          <span>Mon compte</span>
-        </a>
+            <span>{user.email ?? "Mon compte"} · Déconnexion</span>
+          </button>
+        ) : (
+          <button
+            className="account-link"
+            type="button"
+            disabled={isIdentityLoading}
+            onClick={() => openAuthDialog("login")}
+          >
+            <span className="account-icon" aria-hidden="true">
+              <svg viewBox="0 0 24 24" fill="none">
+                <circle cx="12" cy="8" r="3.25" />
+                <path d="M5.5 20c.45-3.1 2.95-5.25 6.5-5.25s6.05 2.15 6.5 5.25" />
+              </svg>
+            </span>
+            <span>{isIdentityLoading ? "Chargement…" : "Se connecter"}</span>
+          </button>
+        )}
       </header>
 
       <main>
-        <CampaignsPage
-          hidden={page !== "campaigns"}
-          selectionReset={campaignSelectionReset}
-        />
+        {user ? (
+          <CampaignsPage
+            key={user.id}
+            hidden={page !== "campaigns"}
+            selectionReset={campaignSelectionReset}
+            storageKey={`${STORAGE_KEY}:${user.id}`}
+          />
+        ) : null}
+        {(page === "campaigns" || page === "characters") && !user ? (
+          <section className="campaigns-page protected-access">
+            <div className="protected-access-card">
+              <span className="protected-access-mark" aria-hidden="true">
+                ♙
+              </span>
+              <p className="eyebrow section-eyebrow">Votre espace personnel</p>
+              <h1>
+                {isIdentityLoading
+                  ? "Vérification de votre compte…"
+                  : `Connectez-vous pour accéder à vos ${page === "campaigns" ? "campagnes" : "personnages"}.`}
+              </h1>
+              <p>
+                Vos campagnes et personnages sont réservés aux membres
+                connectés.
+              </p>
+              {!isIdentityLoading ? (
+                <div className="protected-access-actions">
+                  <button
+                    className="button button-primary"
+                    type="button"
+                    onClick={() => openAuthDialog("login")}
+                  >
+                    Se connecter
+                  </button>
+                  <button
+                    className="text-link"
+                    type="button"
+                    onClick={() => openAuthDialog("signup")}
+                  >
+                    Créer un compte <span aria-hidden="true">→</span>
+                  </button>
+                </div>
+              ) : null}
+            </div>
+          </section>
+        ) : null}
+        {page === "characters" && user ? (
+          <section className="campaigns-page protected-access">
+            <div className="protected-access-card">
+              <span className="protected-access-mark" aria-hidden="true">
+                ♙
+              </span>
+              <p className="eyebrow section-eyebrow">Votre espace personnel</p>
+              <h1>Vos personnages suivent leurs campagnes.</h1>
+              <p>
+                Les fiches des personnages sont accessibles dans leurs
+                campagnes. La gestion indépendante des personnages n’est pas
+                encore disponible.
+              </p>
+              <button
+                className="button button-primary"
+                type="button"
+                onClick={openCampaigns}
+              >
+                Voir mes campagnes <span aria-hidden="true">→</span>
+              </button>
+            </div>
+          </section>
+        ) : null}
         {page === "encyclopedia" ? (
           <EncyclopediaPage />
         ) : page === "tools" ? (
@@ -251,6 +461,11 @@ function App() {
                         event.preventDefault();
                         openCampaigns();
                       }
+                    : destination.id === "personnages"
+                      ? (event) => {
+                          event.preventDefault();
+                          openCharacters();
+                        }
                     : destination.id === "encyclopedie"
                       ? (event) => {
                           event.preventDefault();
@@ -287,14 +502,144 @@ function App() {
           <div>
             <p className="eyebrow">Votre espace</p>
             <h2>Une place à votre table.</h2>
-            <p>Retrouvez bientôt ici vos campagnes et vos personnages.</p>
+            <p>Vos campagnes et personnages sont réservés aux membres.</p>
           </div>
-          <span className="callout-note">Le Grimoire prend forme</span>
+          <button
+            className="button button-primary account-callout-action"
+            type="button"
+            onClick={() =>
+              user
+                ? openCampaigns()
+                : openAuthDialog("login")
+            }
+          >
+            {user ? "Voir mes campagnes" : "Se connecter"}
+          </button>
             </section>
 
           </>
         ) : null}
       </main>
+
+      {identityError && !authDialogMode ? (
+        <p className="auth-global-error" role="alert">
+          {identityError}
+        </p>
+      ) : null}
+
+      {authDialogMode ? (
+        <div
+          className="campaign-modal-backdrop auth-modal-backdrop"
+          onMouseDown={(event) => {
+            if (event.target === event.currentTarget && !isAuthSubmitting) {
+              setAuthDialogMode(null);
+            }
+          }}
+        >
+          <section
+            className="campaign-modal auth-modal"
+            role="dialog"
+            aria-modal="true"
+            aria-labelledby="auth-dialog-title"
+          >
+            <div className="campaign-modal-heading">
+              <div>
+                <p className="eyebrow section-eyebrow">Votre espace personnel</p>
+                <h2 id="auth-dialog-title">
+                  {authDialogMode === "login"
+                    ? "Connexion"
+                    : "Créer un compte"}
+                </h2>
+              </div>
+              <button
+                className="modal-close"
+                type="button"
+                aria-label="Fermer"
+                disabled={isAuthSubmitting}
+                onClick={() => setAuthDialogMode(null)}
+              >
+                ×
+              </button>
+            </div>
+            <form className="campaign-form" onSubmit={submitAuth}>
+              <label className="form-field" htmlFor="auth-email">
+                <span>Adresse e-mail</span>
+                <input
+                  autoFocus
+                  id="auth-email"
+                  type="email"
+                  autoComplete="email"
+                  required
+                  value={authEmail}
+                  onChange={(event) => setAuthEmail(event.target.value)}
+                />
+              </label>
+              <label className="form-field" htmlFor="auth-password">
+                <span>Mot de passe</span>
+                <input
+                  id="auth-password"
+                  type="password"
+                  autoComplete={
+                    authDialogMode === "login"
+                      ? "current-password"
+                      : "new-password"
+                  }
+                  minLength={6}
+                  required
+                  value={authPassword}
+                  onChange={(event) => setAuthPassword(event.target.value)}
+                />
+              </label>
+              {identityError ? (
+                <p className="auth-form-message auth-form-error" role="alert">
+                  {identityError}
+                </p>
+              ) : null}
+              {authMessage ? (
+                <p
+                  className="auth-form-message auth-form-success"
+                  role="status"
+                >
+                  {authMessage}
+                </p>
+              ) : null}
+              <div className="campaign-form-actions">
+                <button
+                  className="button button-primary"
+                  type="submit"
+                  disabled={isAuthSubmitting}
+                >
+                  {isAuthSubmitting
+                    ? "Veuillez patienter…"
+                    : authDialogMode === "login"
+                      ? "Se connecter"
+                      : "Créer mon compte"}
+                </button>
+              </div>
+            </form>
+            <p className="auth-mode-switch">
+              {authDialogMode === "login"
+                ? "Pas encore de compte ?"
+                : "Vous avez déjà un compte ?"}
+              <button
+                type="button"
+                disabled={isAuthSubmitting}
+                onClick={() => {
+                  setAuthDialogMode(
+                    authDialogMode === "login" ? "signup" : "login",
+                  );
+                  setAuthMessage(null);
+                  setIdentityError(null);
+                }}
+              >
+                {authDialogMode === "login"
+                  ? "Créer un compte"
+                  : "Se connecter"}
+              </button>
+            </p>
+          </section>
+        </div>
+      ) : null}
 
       <footer className="site-footer">
         <a
