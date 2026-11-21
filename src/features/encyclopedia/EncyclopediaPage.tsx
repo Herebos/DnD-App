@@ -945,6 +945,7 @@ export default function EncyclopediaPage() {
     ["Taille", "size"],
     ["Type", "type"],
     ["Alignement", "alignment"],
+    ["Langues", "languages"],
     ["Facteur de puissance", "challenge_rating"],
     ["Points de vie", "hit_points"],
     ["Classe d’armure", "armor_class"],
