@@ -383,10 +383,19 @@ export function parseCampaignImport(jsonText: string): Campaign[] {
     throw new Error("La sauvegarde ne contient aucune campagne à importer.");
   }
 
-  const campaigns = parsed.campaigns.map(migrateCampaign);
+  return parseCampaignCollection(parsed.campaigns, "sauvegarde");
+}
+
+export function parseCampaignCollection(
+  items: unknown[],
+  source: "base" | "sauvegarde" = "base",
+): Campaign[] {
+  const campaigns = items.map(migrateCampaign);
   if (campaigns.some((campaign) => campaign === null)) {
     throw new Error(
-      "La sauvegarde contient une campagne invalide ou incompatible. Aucune campagne n’a été importée.",
+      source === "base"
+        ? "La base contient une campagne invalide ou incompatible."
+        : "La sauvegarde contient une campagne invalide ou incompatible. Aucune campagne n’a été importée.",
     );
   }
 
@@ -394,7 +403,11 @@ export function parseCampaignImport(jsonText: string): Campaign[] {
     (campaign): campaign is Campaign => campaign !== null,
   );
   if (!hasUniqueIds(validatedCampaigns)) {
-    throw new Error("La sauvegarde contient des identifiants de campagne en double.");
+    throw new Error(
+      source === "base"
+        ? "La base contient des identifiants de campagne en double."
+        : "La sauvegarde contient des identifiants de campagne en double.",
+    );
   }
   for (const campaign of validatedCampaigns) {
     const collections = [

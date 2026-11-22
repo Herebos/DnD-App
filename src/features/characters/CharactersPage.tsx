@@ -5,6 +5,10 @@ import {
   type FormEvent,
 } from "react";
 import { isRecord } from "../../utils/isRecord";
+import {
+  fetchAccountCollection,
+  saveAccountCollection,
+} from "../../utils/accountCollectionApi";
 
 const API_BASE_URL = "https://www.dnd5eapi.co/api/2014";
 const MAX_PORTRAIT_BYTES = 2 * 1024 * 1024;
@@ -319,6 +323,20 @@ function parseCharacterImport(jsonText: string): Character[] {
   return validCharacters;
 }
 
+function parseCharacterCollection(items: unknown[]): Character[] {
+  const characters = items.map(migrateCharacter);
+  if (characters.some((character) => character === null)) {
+    throw new Error("La base contient un personnage invalide ou incompatible.");
+  }
+  const validCharacters = characters.filter(
+    (character): character is Character => character !== null,
+  );
+  if (!hasUniqueCharacterIds(validCharacters)) {
+    throw new Error("La base contient des identifiants de personnage en double.");
+  }
+  return validCharacters;
+}
+
 async function fetchOptions(category: string, signal: AbortSignal) {
   const response = await fetch(`${API_BASE_URL}/${category}?limit=1000`, {
     signal,
@@ -596,13 +614,24 @@ function readImageAsDataUrl(file: File) {
 
 export default function CharactersPage({
   storageKey,
+  databaseEnabled,
 }: {
   storageKey: string;
+  databaseEnabled: boolean;
 }) {
   const [stored] = useState(() => loadCharacters(storageKey));
   const [characters, setCharacters] = useState(stored.characters);
   const [storageError, setStorageError] = useState(stored.error);
   const [shouldPersist, setShouldPersist] = useState(!stored.error);
+  const [databaseReady, setDatabaseReady] = useState(!databaseEnabled);
+  const [databaseLoadError, setDatabaseLoadError] = useState<string | null>(
+    null,
+  );
+  const [databaseSaveError, setDatabaseSaveError] = useState<string | null>(
+    null,
+  );
+  const [databaseLoadRequest, setDatabaseLoadRequest] = useState(0);
+  const [databaseSaveRequest, setDatabaseSaveRequest] = useState(0);
   const [lists, setLists] = useState<CharacterLists>({
     races: [],
     classes: [],
@@ -676,6 +705,64 @@ export default function CharactersPage({
       );
     }
   }, [characters, shouldPersist, storageKey]);
+
+  useEffect(() => {
+    if (!databaseEnabled) return;
+    const controller = new AbortController();
+    setDatabaseReady(false);
+    setDatabaseLoadError(null);
+    fetchAccountCollection(
+      "characters",
+      controller.signal,
+      parseCharacterCollection,
+    )
+      .then(async (result) => {
+        if (controller.signal.aborted) return;
+        if (!result.initialized) {
+          if (!stored.error && stored.characters.length > 0) {
+            await saveAccountCollection(
+              "characters",
+              stored.characters,
+              controller.signal,
+            );
+          }
+          return;
+        }
+        setCharacters(result.items);
+      })
+      .then(() => {
+        if (controller.signal.aborted) return;
+        setDatabaseReady(true);
+      })
+      .catch((error: unknown) => {
+        if (controller.signal.aborted) return;
+        setDatabaseLoadError(getErrorMessage(error));
+      });
+    return () => controller.abort();
+  }, [databaseEnabled, databaseLoadRequest, storageKey, stored]);
+
+  useEffect(() => {
+    if (!databaseEnabled || !databaseReady || !shouldPersist) return;
+    const controller = new AbortController();
+    const timeout = window.setTimeout(() => {
+      saveAccountCollection("characters", characters, controller.signal)
+        .then(() => setDatabaseSaveError(null))
+        .catch((error: unknown) => {
+          if (controller.signal.aborted) return;
+          setDatabaseSaveError(getErrorMessage(error));
+        });
+    }, 300);
+    return () => {
+      window.clearTimeout(timeout);
+      controller.abort();
+    };
+  }, [
+    characters,
+    databaseEnabled,
+    databaseReady,
+    databaseSaveRequest,
+    shouldPersist,
+  ]);
 
   useEffect(() => {
     if (!isFormOpen && !pendingCharacterImport) return;
@@ -972,6 +1059,31 @@ export default function CharactersPage({
     window.setTimeout(() => URL.revokeObjectURL(downloadUrl), 0);
   }
 
+  if (databaseEnabled && !databaseReady) {
+    return (
+      <section className="campaigns-page protected-access">
+        <div className="protected-access-card">
+          <p className="eyebrow section-eyebrow">Synchronisation du compte</p>
+          <h1>Chargement de vos personnages…</h1>
+          <p role={databaseLoadError ? "alert" : "status"}>
+            {databaseLoadError
+              ? `La base de données n’a pas pu être chargée : ${databaseLoadError} Vos données locales restent intactes.`
+              : "Nous récupérons vos personnages avant d’autoriser les modifications."}
+          </p>
+          {databaseLoadError ? (
+            <button
+              className="button button-primary"
+              type="button"
+              onClick={() => setDatabaseLoadRequest((current) => current + 1)}
+            >
+              Réessayer
+            </button>
+          ) : null}
+        </div>
+      </section>
+    );
+  }
+
   return (
     <section className="campaigns-page characters-page">
       <div className="campaigns-heading">
@@ -1042,6 +1154,19 @@ export default function CharactersPage({
       {storageError ? (
         <p className="characters-message characters-error" role="alert">
           {storageError}
+        </p>
+      ) : null}
+      {databaseSaveError ? (
+        <p className="characters-message characters-error" role="alert">
+          La synchronisation avec la base a échoué : {databaseSaveError}
+          {" "}Vos changements restent dans ce navigateur.
+          <button
+            className="text-link"
+            type="button"
+            onClick={() => setDatabaseSaveRequest((current) => current + 1)}
+          >
+            Réessayer
+          </button>
         </p>
       ) : null}
       {apiError ? (
