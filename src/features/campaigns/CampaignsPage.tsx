@@ -18,6 +18,7 @@ import {
   MAX_CAMPAIGN_IMPORT_BYTES,
   officialClasses,
   parseCampaignImport,
+  parseCampaignCollection,
   parseTags,
   serializeCampaigns,
   type Campaign,
@@ -30,23 +31,38 @@ import {
   type CampaignSummary,
   type CampaignSummaryForm,
 } from "./campaignData";
+import {
+  fetchAccountCollection,
+  saveAccountCollection,
+} from "../../utils/accountCollectionApi";
 
 type CampaignsPageProps = {
   hidden: boolean;
   selectionReset: number;
   storageKey: string;
+  databaseEnabled: boolean;
 };
 
 export default function CampaignsPage({
   hidden,
   selectionReset,
   storageKey,
+  databaseEnabled,
 }: CampaignsPageProps) {
   const [storedCampaigns] = useState(() => loadCampaigns(storageKey));
   const [campaigns, setCampaignsState] = useState(storedCampaigns.campaigns);
   const campaignsRef = useRef(campaigns);
   const [storageError, setStorageError] = useState(storedCampaigns.error);
   const [shouldPersist, setShouldPersist] = useState(!storedCampaigns.error);
+  const [databaseReady, setDatabaseReady] = useState(!databaseEnabled);
+  const [databaseLoadError, setDatabaseLoadError] = useState<string | null>(
+    null,
+  );
+  const [databaseSaveError, setDatabaseSaveError] = useState<string | null>(
+    null,
+  );
+  const [databaseLoadRequest, setDatabaseLoadRequest] = useState(0);
+  const [databaseSaveRequest, setDatabaseSaveRequest] = useState(0);
   const [pendingCampaignImport, setPendingCampaignImport] = useState<{
     fileName: string;
     resultCampaigns: Campaign[];
@@ -127,6 +143,72 @@ export default function CampaignsPage({
       );
     }
   }, [campaigns, shouldPersist, storageKey]);
+
+  useEffect(() => {
+    if (!databaseEnabled) return;
+    const controller = new AbortController();
+    setDatabaseReady(false);
+    setDatabaseLoadError(null);
+    fetchAccountCollection(
+      "campaigns",
+      controller.signal,
+      parseCampaignCollection,
+    )
+      .then(async (result) => {
+        if (controller.signal.aborted) return;
+        if (!result.initialized) {
+          if (campaignsRef.current.length > 0) {
+            await saveAccountCollection(
+              "campaigns",
+              campaignsRef.current,
+              controller.signal,
+            );
+          }
+          return;
+        }
+        replaceCampaigns(result.items);
+      })
+      .then(() => {
+        if (controller.signal.aborted) return;
+        setDatabaseReady(true);
+      })
+      .catch((error: unknown) => {
+        if (controller.signal.aborted) return;
+        setDatabaseLoadError(
+          error instanceof Error
+            ? error.message
+            : "Une erreur inattendue est survenue.",
+        );
+      });
+    return () => controller.abort();
+  }, [databaseEnabled, databaseLoadRequest, storageKey]);
+
+  useEffect(() => {
+    if (!databaseEnabled || !databaseReady || !shouldPersist) return;
+    const controller = new AbortController();
+    const timeout = window.setTimeout(() => {
+      saveAccountCollection("campaigns", campaigns, controller.signal)
+        .then(() => setDatabaseSaveError(null))
+        .catch((error: unknown) => {
+          if (controller.signal.aborted) return;
+          setDatabaseSaveError(
+            error instanceof Error
+              ? error.message
+              : "Une erreur inattendue est survenue.",
+          );
+        });
+    }, 300);
+    return () => {
+      window.clearTimeout(timeout);
+      controller.abort();
+    };
+  }, [
+    campaigns,
+    databaseEnabled,
+    databaseReady,
+    databaseSaveRequest,
+    shouldPersist,
+  ]);
 
   useEffect(() => {
     if (
@@ -791,7 +873,33 @@ export default function CampaignsPage({
 
   return (
     <>
-      <section className="campaigns-page" hidden={hidden} aria-labelledby="campaigns-title">
+      {databaseEnabled && !databaseReady && !hidden ? (
+        <section className="campaigns-page protected-access">
+          <div className="protected-access-card">
+            <p className="eyebrow section-eyebrow">Synchronisation du compte</p>
+            <h1>Chargement de vos campagnes…</h1>
+            <p role={databaseLoadError ? "alert" : "status"}>
+              {databaseLoadError
+                ? `La base de données n’a pas pu être chargée : ${databaseLoadError} Vos données locales restent intactes.`
+                : "Nous récupérons vos campagnes avant d’autoriser les modifications."}
+            </p>
+            {databaseLoadError ? (
+              <button
+                className="button button-primary"
+                type="button"
+                onClick={() => setDatabaseLoadRequest((current) => current + 1)}
+              >
+                Réessayer
+              </button>
+            ) : null}
+          </div>
+        </section>
+      ) : null}
+      <section
+        className="campaigns-page"
+        hidden={hidden || (databaseEnabled && !databaseReady)}
+        aria-labelledby="campaigns-title"
+      >
         <div className="campaigns-heading">
           <div>
             <p className="eyebrow">
@@ -877,6 +985,19 @@ export default function CampaignsPage({
             {storageError}
           </p>
         )}
+        {databaseSaveError ? (
+          <p className="storage-message" role="alert">
+            La synchronisation avec la base a échoué : {databaseSaveError}
+            {" "}Vos changements restent dans ce navigateur.
+            <button
+              className="text-link"
+              type="button"
+              onClick={() => setDatabaseSaveRequest((current) => current + 1)}
+            >
+              Réessayer
+            </button>
+          </p>
+        ) : null}
 
         {selectedCampaign ? (
           <article className="campaign-detail">

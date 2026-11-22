@@ -306,6 +306,7 @@ function App() {
             hidden={page !== "campaigns"}
             selectionReset={campaignSelectionReset}
             storageKey={`${STORAGE_KEY}:${user.id}`}
+            databaseEnabled={!localDemoAuthEnabled}
           />
         ) : null}
         {(page === "campaigns" || page === "characters") && !user ? (
@@ -354,6 +355,7 @@ function App() {
           <CharactersPage
             key={`characters-${user.id}`}
             storageKey={`le-grimoire-characters:${user.id}`}
+            databaseEnabled={!localDemoAuthEnabled}
           />
         ) : null}
         {page === "encyclopedia" ? (
