@@ -15,9 +15,18 @@ import {
 import ToolsPage from "./features/tools/ToolsPage";
 import EncyclopediaPage from "./features/encyclopedia/EncyclopediaPage";
 import CampaignsPage from "./features/campaigns/CampaignsPage";
+import CharactersPage from "./features/characters/CharactersPage";
 import { STORAGE_KEY } from "./features/campaigns/campaignData";
 
 type AuthDialogMode = "login" | "signup";
+type LocalDemoUser = { id: string; email: string };
+
+const localDemoAuthEnabled =
+  import.meta.env.DEV && import.meta.env.VITE_LOCAL_DEMO_AUTH === "true";
+const localDemoUser: LocalDemoUser = {
+  id: "local-admin",
+  email: "Admin local (démo)",
+};
 
 let identityInitialization: Promise<User | null> | null = null;
 
@@ -75,7 +84,7 @@ function App() {
     "home" | "campaigns" | "characters" | "encyclopedia" | "tools"
   >("home");
   const [campaignSelectionReset, setCampaignSelectionReset] = useState(0);
-  const [user, setUser] = useState<User | null>(null);
+  const [user, setUser] = useState<User | LocalDemoUser | null>(null);
   const [isIdentityLoading, setIsIdentityLoading] = useState(true);
   const [identityError, setIdentityError] = useState<string | null>(null);
   const [authDialogMode, setAuthDialogMode] =
@@ -86,6 +95,12 @@ function App() {
   const [isAuthSubmitting, setIsAuthSubmitting] = useState(false);
 
   useEffect(() => {
+    if (localDemoAuthEnabled) {
+      setUser(localDemoUser);
+      setIsIdentityLoading(false);
+      return;
+    }
+
     const unsubscribe = onAuthChange((_event, nextUser) => {
       setUser(nextUser);
       setIsIdentityLoading(false);
@@ -126,6 +141,11 @@ function App() {
   }
 
   function openAuthDialog(mode: AuthDialogMode) {
+    if (localDemoAuthEnabled && mode === "login") {
+      setUser(localDemoUser);
+      setAuthDialogMode(null);
+      return;
+    }
     setAuthDialogMode(mode);
     setAuthMessage(null);
     setIdentityError(null);
@@ -164,6 +184,11 @@ function App() {
   }
 
   async function signOut() {
+    if (localDemoAuthEnabled) {
+      setUser(null);
+      setPage("home");
+      return;
+    }
     setIdentityError(null);
     try {
       await logout();
@@ -263,7 +288,13 @@ function App() {
                 <path d="M5.5 20c.45-3.1 2.95-5.25 6.5-5.25s6.05 2.15 6.5 5.25" />
               </svg>
             </span>
-            <span>{isIdentityLoading ? "Chargement…" : "Se connecter"}</span>
+            <span>
+              {isIdentityLoading
+                ? "Chargement…"
+                : localDemoAuthEnabled
+                  ? "Accéder à la démo"
+                  : "Se connecter"}
+            </span>
           </button>
         )}
       </header>
@@ -287,11 +318,14 @@ function App() {
               <h1>
                 {isIdentityLoading
                   ? "Vérification de votre compte…"
-                  : `Connectez-vous pour accéder à vos ${page === "campaigns" ? "campagnes" : "personnages"}.`}
+                  : localDemoAuthEnabled
+                    ? "Accédez à l’espace local de démonstration."
+                    : `Connectez-vous pour accéder à vos ${page === "campaigns" ? "campagnes" : "personnages"}.`}
               </h1>
               <p>
-                Vos campagnes et personnages sont réservés aux membres
-                connectés.
+                {localDemoAuthEnabled
+                  ? "Les données de démonstration restent dans ce navigateur et ne sont pas synchronisées."
+                  : "Vos campagnes et personnages sont réservés aux membres connectés."}
               </p>
               {!isIdentityLoading ? (
                 <div className="protected-access-actions">
@@ -300,42 +334,27 @@ function App() {
                     type="button"
                     onClick={() => openAuthDialog("login")}
                   >
-                    Se connecter
+                    {localDemoAuthEnabled ? "Accéder à la démo" : "Se connecter"}
                   </button>
-                  <button
-                    className="text-link"
-                    type="button"
-                    onClick={() => openAuthDialog("signup")}
-                  >
-                    Créer un compte <span aria-hidden="true">→</span>
-                  </button>
+                  {!localDemoAuthEnabled ? (
+                    <button
+                      className="text-link"
+                      type="button"
+                      onClick={() => openAuthDialog("signup")}
+                    >
+                      Créer un compte <span aria-hidden="true">→</span>
+                    </button>
+                  ) : null}
                 </div>
               ) : null}
             </div>
           </section>
         ) : null}
         {page === "characters" && user ? (
-          <section className="campaigns-page protected-access">
-            <div className="protected-access-card">
-              <span className="protected-access-mark" aria-hidden="true">
-                ♙
-              </span>
-              <p className="eyebrow section-eyebrow">Votre espace personnel</p>
-              <h1>Vos personnages suivent leurs campagnes.</h1>
-              <p>
-                Les fiches des personnages sont accessibles dans leurs
-                campagnes. La gestion indépendante des personnages n’est pas
-                encore disponible.
-              </p>
-              <button
-                className="button button-primary"
-                type="button"
-                onClick={openCampaigns}
-              >
-                Voir mes campagnes <span aria-hidden="true">→</span>
-              </button>
-            </div>
-          </section>
+          <CharactersPage
+            key={`characters-${user.id}`}
+            storageKey={`le-grimoire-characters:${user.id}`}
+          />
         ) : null}
         {page === "encyclopedia" ? (
           <EncyclopediaPage />
